@@ -12,7 +12,6 @@ sample_rate_values = linspace(0.01, 0.15, 15);
 
 % 生成 psi_random 和 psi_mmi
 psi_file = sprintf('output/map_%d/psi%d.mat', map, map);
-
 if exist(psi_file, 'file')  % 如果文件存在，直接加载
     fprintf('psi already exists.\n');
     load(psi_file, 'psi', 'psi_opt');
@@ -71,6 +70,13 @@ if strcmpi(command, 'yes')
     
     for sample_rate_set = 1:15 % 选择采样率 0.01 ~ 0.15
         rate = sample_rate_set*0.01;
+
+        % 选取部分rate保存图片
+        if ~ismember(rate, [0.01, 0.05, 0.10, 0.15])
+            continue;  % 如果 rate 不在指定的集合中，则跳过该循环
+        end
+
+        fprintf('Generating figures of rate = %.2f\n', rate);
         img_dir = sprintf('output/map_%d/sample_rate=%.2f', map, rate);
         if ~exist(img_dir,'dir')
             mkdir(img_dir);
@@ -78,15 +84,15 @@ if strcmpi(command, 'yes')
         
         % 恢复信号图
         plot_recover_signal(map, sample_rate_set);
-        saveas(gcf, fullfile(img_dir, sprintf('RandomOMP_rate=%.2f.png', rate)));
+        saveas(gcf, fullfile(img_dir, sprintf('Recovered_Map-rate=%.2f.png', rate)));
     
         % OMP收敛性图
         plot_converge_omp(map, sample_rate_set);
-        saveas(gcf, fullfile(img_dir, sprintf('RandomSBL_rate=%.2f.png', rate)));
+        saveas(gcf, fullfile(img_dir, sprintf('RandomOMP_rate=%.2f.png', rate)));
     
         % SBL收敛性图
         plot_converge_sbl(map, sample_rate_set);
-        saveas(gcf, fullfile(img_dir, sprintf('Recovered_Map-rate=%.2f.png', rate)));
+        saveas(gcf, fullfile(img_dir, sprintf('RandomSBL_rate=%.2f.png', rate)));
     
     end
 

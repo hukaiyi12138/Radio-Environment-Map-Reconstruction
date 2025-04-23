@@ -1,13 +1,40 @@
-function [psi, psi_opt] = generate_psi(sample_rate_values, M, N, phi)
-    % 初始化 psi 为 cell 数组
-    psi = cell(1, length(sample_rate_values));  % 预分配，存储不同采样率下的结果
-    psi_opt = cell(1, length(sample_rate_values));  % 预分配用于存储 MMI 结果
-
-    for i = 1:length(sample_rate_values)
-        % 使用 cell 数组时要使用 `{}` 来访问
-        psi{i} = psi_random(M, N, sample_rate_values(i));  
-        fprintf('Finish psi_random: %d/%d\n', i, length(sample_rate_values));
-        psi_opt{i} = psi_mmi(M, N, sample_rate_values(i), phi);  % 计算 MMI 采样矩阵
-        fprintf('Finish psi_mmi: %d/%d\n', i, length(sample_rate_values));
+%% Choose method to generate measurement matrix
+function [psi] = generate_psi(method, map, sample_rate)
+    M = width(map.Tx);
+    N = map.size;
+    switch(method)
+        case "random"
+            psi = psi_random(M, N, sample_rate);
+        case "mmi"
+            psi = psi_mmi(M, N, sample_rate);
+        otherwise
+            error('Unsupported method in generating ψ: %s', method);
     end
+end
+
+% Randomly select sample locations
+function psi = psi_random(M, N, sample_rate)
+    % M: psi height
+    % N: psi width
+    psi = zeros(M, N);
+    
+    samples = round(sample_rate * N);
+    if samples > M * N
+        error('target_ones cannot be greater than the total number of elements in the matrix.');
+    end
+    
+    for i = 1:M
+        ones_positions = randperm(N, samples);  % Randomly select position
+        psi(i, ones_positions) = 1;
+    end
+end
+
+% Maximize mutual information
+function psi = psi_mmi(M, N, sample_rate)
+    % M: psi height
+    % N: psi width
+    psi = zeros(M, N);
+
+    error('method psi_mmi is not available.');
+
 end

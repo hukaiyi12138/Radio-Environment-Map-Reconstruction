@@ -1,10 +1,11 @@
-%% SBL algorithm
+%% CSBL algorithm
+% Cluster-based sbl algorithm
 % y: Observation vector
 % A: Sensing matrix
 % t: Number of iterations
 % sigma: Noise power (σ^2)
 % mu: Recovered signal
-function [mu, converge_point, mu_record] = sbl(y, A, t, sigma)
+function [mu, converge_point, mu_record] = csbl(y, A, t, sigma)
     % Initialize parameters
     [M, N] = size(A); % A: M x N
     a = 1e-6;
@@ -42,8 +43,11 @@ function [mu, converge_point, mu_record] = sbl(y, A, t, sigma)
         alpha = alpha_new;
         beta = beta_new;
 
-    disp(alpha);
-    disp(det(Sigma));
+        % Adaptive dynamic threshold truncation (CSBL)
+        threshold = mean(alpha.^(-1)) - std(alpha.^(-1));
+        cond_alpha = alpha.^(-1) <= threshold;
+        alpha(cond_alpha) = 0;  % Set small alpha values to zero
+        alpha(alpha.^(-1) <= threshold) = 0;
 
         % Compute covariance matrix Sigma and mean mu
         Sigma = pinv(beta * param1 + diag(alpha));  % Sigma: N x N

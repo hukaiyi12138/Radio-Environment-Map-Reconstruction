@@ -1,2 +1,2 @@
-# 2D Radio Environment Map Reconstruction
+# Radio Environment Map Reconstruction
 

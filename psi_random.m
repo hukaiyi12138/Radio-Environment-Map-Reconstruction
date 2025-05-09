@@ -1,3 +1,4 @@
+% Randomly select sample locations
 function psi = psi_random(M, N, sample_rate)
     % M: psi height
     % N: psi width

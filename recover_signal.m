@@ -11,7 +11,7 @@ function [omega_est, others] = recover_signal(method, y, Phi, sigma)
 
         case "sbl"
             % SBL
-            [omega_est, ~, ~] = sbl(y, Phi, iter_sbl, sigma);
+            [omega_est, ~] = sbl(y, Phi, iter_sbl, sigma);
 
         case "csbl"
             % CSBL & Truncation
@@ -21,7 +21,7 @@ function [omega_est, others] = recover_signal(method, y, Phi, sigma)
 
         case "msbl"
             % SBL & Truncation & MMD
-            [omega_est_sbl, ~, ~] = sbl(y, Phi, iter_sbl, sigma);
+            [omega_est_sbl, ~] = sbl(y, Phi, iter_sbl, sigma);
             omega_est_trun = thresholding_sbl(omega_est_sbl); % Truncation
             omega_est_mmd = mmd_cluster(omega_est_trun, sparsity); % MMD method
             omega_est = omega_est_mmd; % Result

@@ -4,7 +4,7 @@
 % t: Number of iterations
 % sigma: Noise power (σ^2)
 % mu: Recovered signal
-function [mu, converge_point, mu_record] = sbl(y, A, t, sigma)
+function [mu, converge_point] = sbl(y, A, t, sigma)
     % Initialize parameters
     [M, N] = size(A); % A: M x N
     a = 1e-6;
@@ -24,8 +24,6 @@ function [mu, converge_point, mu_record] = sbl(y, A, t, sigma)
     Sigma = pinv(beta * param1 + diag(alpha));  % Sigma: N x N
     mu = beta * Sigma * param2; % N x 1
 
-    mu_record = zeros(N, t);  % To store the value of mu in each iteration
-
     for iter = 1: t
 
         % Update alpha & beta
@@ -34,7 +32,7 @@ function [mu, converge_point, mu_record] = sbl(y, A, t, sigma)
 
         % Check for convergence
         converge_point = iter;
-        if iter >= 2 && norm(mu - mu_record(:, iter - 1)) < tol
+        if norm(y - A * mu)^2 < tol
             converge_point = iter - 1;
             break;
         end
@@ -42,12 +40,10 @@ function [mu, converge_point, mu_record] = sbl(y, A, t, sigma)
         alpha = alpha_new;
         beta = beta_new;
 
-    disp(alpha);
-    disp(det(Sigma));
-
         % Compute covariance matrix Sigma and mean mu
         Sigma = pinv(beta * param1 + diag(alpha));  % Sigma: N x N
         mu = beta * Sigma * param2; % N x 1
+        mu = max(mu, 0);
 
     end
     

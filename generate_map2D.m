@@ -8,8 +8,6 @@ function [map] = generate_map2D(K, Nx, Ny)
     freq = 1e9; % Frequency = 1 GHz
 
     % Set map size
-%     Nx = 10;
-%     Ny = 10;
     N = Nx * Ny;
     map = struct('sparsity', K ,'width', Nx, 'height', Ny, 'size', N, 'Tx', [], 'omega_real', []); % Output map info
 

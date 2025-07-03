@@ -1,10 +1,11 @@
 % Maximize mutual information
-function psi = psi_mmi(M, N, sample_rate, phi)
-    sample = round(sample_rate * N);    % 采样点数
+function psi = psi_mmi(M, N, phi)
     psi = zeros(M, N);                  % 最终的测量矩阵
     selected = false(1, N);             % 已选位置掩码
     Phi_t = [];                         % 已选位置对应的字典行组成的 Φ_t
-
+    
+    tic;
+    fprintf('MMI running ...\n');
     for t = 1:M
         candidates = find(~selected);  % 剩余候选位置
         if t == 1
@@ -26,4 +27,6 @@ function psi = psi_mmi(M, N, sample_rate, phi)
         psi(t, i_best) = 1;
         Phi_t = [Phi_t; phi(i_best, :)];
     end
+    fprintf('MMI duration: %.4lf', toc);
+
 end

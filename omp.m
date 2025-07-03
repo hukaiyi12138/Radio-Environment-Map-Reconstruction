@@ -4,7 +4,7 @@
 % t: Number of iterations
 function [theta, rn_norm, converge_point] = omp(y, A, t)
     % Set the convergence tolerance
-    tol = 1e-3;
+    tol = 1e-6;
 
     % Pre-allocate storage space
     rn_norm = zeros(1, t);  % Store the norm of the residual r_n at each iteration
@@ -30,8 +30,7 @@ function [theta, rn_norm, converge_point] = omp(y, A, t)
         A(:, pos) = zeros(m, 1);      % Set this column of A to zero (orthogonalize)
 
         % Use lsqnonneg to ensure that theta is non-negative
-        options = optimset('TolX', tol);  % 调整 TolX 值
-        theta_ls = lsqnonneg(At(:, 1:i), y, options);% Solve the least squares problem ensuring theta is non-negative
+        theta_ls = lsqnonneg(At(:, 1:i), y);% Solve the least squares problem ensuring theta is non-negative
         r_n = y - At(:, 1:i) * theta_ls;  % Update the residual
 
         % Compute the norm of the residual

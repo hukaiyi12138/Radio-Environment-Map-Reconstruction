@@ -1,9 +1,8 @@
 %% Recover signal through different methods
-function [omega_est, others] = recover_signal(method, y, Phi, sigma)
+function [omega_est, others] = recover_signal(method, y, Phi, sigma, sparsity)
     others = [];
-    iter_omp = 30;
+    iter_omp = 50;
     iter_sbl = 50;
-    sparsity = height(Phi);
     switch(method)
         case "omp"
             % OMP
@@ -15,7 +14,7 @@ function [omega_est, others] = recover_signal(method, y, Phi, sigma)
 
         case "csbl"
             % CSBL & Truncation
-            [omega_est_sbl, ~, ~] = csbl(y, Phi, iter_sbl, sigma);
+            [omega_est_sbl, ~] = csbl(y, Phi, iter_sbl, sigma);
             omega_est_trun = thresholding_sbl(omega_est_sbl); % Truncation
             omega_est = omega_est_trun; % Result
 
@@ -28,7 +27,7 @@ function [omega_est, others] = recover_signal(method, y, Phi, sigma)
 
         case "cmsbl"
             % CSBL & Truncation & MMD
-            [omega_est_sbl, ~, ~] = csbl(y, Phi, iter_sbl, sigma);
+            [omega_est_sbl, ~] = csbl(y, Phi, iter_sbl, sigma);
             omega_est_trun = truncate(omega_est_sbl); % Truncation
             omega_est_mmd = mmd_cluster(omega_est_trun, sparsity); % MMD method
             omega_est = omega_est_mmd; % Result

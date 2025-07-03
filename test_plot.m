@@ -2,10 +2,10 @@
 clear;
 K = 16;
 r = 0.05;
-method = "random_cmsbl";
+method = "idw_random_omp";
 
-file_name = sprintf("test/K=%d_r=%.2f_%s", K, r, method);
-load(sprintf("test/%s.mat", file_name));
+file_name = sprintf("result/K=%d_r=%.2f_%s", K, r, method);
+load(sprintf("result/%s.mat", file_name));
 
 signal_origin = ln_to_db(phi * omega_real);
 signal_recov = ln_to_db(phi * omega_est);

@@ -21,7 +21,7 @@ function [phi, phi_rt, phi0, p] = generate_phi(method, map)
             [phi] = phi_idw(phi_rt, map, p);
 
         case "halrtc"
-            [phi] = halrtc(phi_rt, map);
+            [phi] = halrtc(phi_rt);
 
         case "kriging"
             [phi] = phi_idw(phi_rt, map);

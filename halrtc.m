@@ -1,4 +1,4 @@
-function [X_hat_sparse] = halrtc(X_in, map)
+function [X_hat_sparse] = halrtc(X_in)
     %—— 把任何稀疏输入都转成密集 ——%
     if issparse(X_in)
         data = full(X_in);
@@ -9,7 +9,7 @@ function [X_hat_sparse] = halrtc(X_in, map)
     %—— 参数 ——%
     alpha1 = 1/3; alpha2 = 1/3; alpha3 = 1/3;
     rho     = 1e-2;
-    MaxIter = 1000;
+    MaxIter = 100;
     
     %—— 初始化 ——%
 %     [I,J,K] = size(data);
@@ -23,13 +23,18 @@ function [X_hat_sparse] = halrtc(X_in, map)
     else
         error('halrtc: only supports 2D or 3D input');
     end
+    
+    allZeroCols = all(data==0, 1);
+    maskUnobs = (data==0) & ~allZeroCols;
+    S = ones(size(data));
+    S(maskUnobs) = 0;
 
     obs     = data;
-    S       = round(rand(I,J,K) + 0.3);
+%     S       = round(rand(I,J,K) + 0.3);
     X       = S .* obs;
     
-    maskUnobs = (X==0);
     X_hat = X;
+
     Y1 = zeros(I,J,K);  Y2 = Y1;  Y3 = Y1;
     convergence = zeros(MaxIter,1);
     
@@ -37,14 +42,14 @@ function [X_hat_sparse] = halrtc(X_in, map)
     tic;
     fprintf("HaLRTC interpolating ...\n");
     for it = 1:MaxIter
-        fprintf("HaLRTC iter = %d\n", it);
+        % fprintf("HaLRTC iter = %d\n", it);
         B1 = t_refold( SVT( t_unfold(X_hat,1) + t_unfold(Y1,1)/rho, alpha1/rho ), 1, I,J,K );
         B2 = t_refold( SVT( t_unfold(X_hat,2) + t_unfold(Y2,2)/rho, alpha2/rho ), 2, I,J,K );
         B3 = t_refold( SVT( t_unfold(X_hat,3) + t_unfold(Y3,3)/rho, alpha3/rho ), 3, I,J,K );
         
         avgB = (B1+B2+B3 - (Y1+Y2+Y3)/rho) / 3;
         X_hat = (1-S).*avgB + S.*X;
-        
+
         Y1 = Y1 - rho*(B1 - X_hat);
         Y2 = Y2 - rho*(B2 - X_hat);
         Y3 = Y3 - rho*(B3 - X_hat);

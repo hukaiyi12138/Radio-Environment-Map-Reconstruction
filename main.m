@@ -16,20 +16,26 @@ if ~exist("result", "dir")
     mkdir("result");
 end
 
-dir_out = sprintf("result/%s", mapname);
-if ~exist(dir_out,"dir")
-    mkdir(dir_out);
+dir = sprintf("result/%s", mapname);
+if ~exist(dir,"dir")
+    mkdir(dir);
 end
 
 % Code start
 fprintf('---- Code started ----\n');
 method = sprintf('%s_%s_%s', method_phi, method_psi, method_recov); % entire method name
-exp = sprintf('%s_K=%d_sa=%.2f_se=%.2f_si=%.2f_%s', mapname, K, sample_rate, select_rate, sigma2, method); % exper name
+exp = sprintf('%s_%s_K=%d_sa=%.2f_se=%.2f_si=%.2f', mapname, method, K, sample_rate, select_rate, sigma2);
 fprintf('Map: %s\n', mapname);
 fprintf('Method: %s\n', method);
 
+% Create output directory
+dir_out = sprintf("%s/%s", dir, exp);
+if ~exist(dir_out,"dir")
+    mkdir(dir_out);
+end
+
 % Load map file
-file_map = sprintf('%s/%s.mat', dir_out, mapname);
+file_map = sprintf('%s/%s.mat', dir, mapname);
 if ~exist(file_map, "file")
     fprintf("Generating map: %s\n", mapname);
     map = generate_map2D(mapname);
@@ -40,7 +46,7 @@ else
 end
 
 % Load map file with specific selected rate
-file_map_se = sprintf('%s/%s_K=%d_se=%.2f.mat', dir_out, mapname, K, select_rate);
+file_map_se = sprintf('%s/%s_K=%d_se=%.2f.mat', dir, mapname, K, select_rate);
 if ~exist(file_map_se, "file")
     fprintf("Selected rate = %.2f in map: %s\n",select_rate, mapname);
 
@@ -65,7 +71,7 @@ else
 end
 
 %% Generate sparse dictionary
-file_phi = sprintf('%s/%s_phi_%s_K=%d_se=%.2f.mat', dir_out, ...
+file_phi = sprintf('%s/%s_phi_%s_K=%d_se=%.2f.mat', dir, ...
     mapname, method_phi, K, select_rate);
 if ~exist(file_phi, "file")
     fprintf("Generating φ by %s\n", method_phi);
@@ -110,15 +116,24 @@ rss_est2D = reshape(rss_est_dbm, map.Nx, map.Ny);
 
 %% Evaluation
 mse = 10 * log10(norm(omega_real - omega_est) / norm(omega_real));
-rmse = norm(rss_est_dbm(~isinf(rss_est_dbm)) - rss_full_dbm(~isinf(rss_full_dbm))) / sqrt(map.size);
+
+% rmse = norm(rss_est_dbm(valid_mask) - rss_full_dbm(valid_mask)) / sqrt(map.size);
+valid_mask = isfinite(rss_est_dbm) & isfinite(rss_full_dbm);
+rmse = norm(rss_est_dbm(valid_mask) - rss_full_dbm(valid_mask)) / sqrt(numel(valid_mask));
+clear("valid_mask");
 
 fprintf('\n---- Evaluation: %s ----\n', exp);
 fprintf('MSE = %.4f dB\n', mse);
 fprintf('RMSE = %.4f dB\n', rmse);
 
 %% Plot and save figure
-plotRSSfig(map, omega_est, rss_full2D, rss_real2D, rss_est2D, ...
-    sample_rate, mse, rmse, method, dir_out, exp);
+figName = {
+    sprintf('%s-Ground_Truth.png', map.name), 
+    sprintf('%s_K=%d_se=%.2f.png', map.name, K, select_rate), 
+    sprintf('%s.png', exp)
+};
+plotRSSfig(map, rss_full2D, rss_real2D, rss_est2D, figName, dir);
+clear("figName");
 
 % Save result
 result_name = sprintf('%s/%s.mat', dir_out, exp);
@@ -144,12 +159,9 @@ function [x, y] = itc(idx, Nx)
 end
 
 % Plot and save RSS figure
-function plotRSSfig(map, omega_est, rss_full2D, rss_real2D, rss_est2D, ...
-    sample_rate, mse, rmse, method, dir_out, expName)
-    % Find positions
+function plotRSSfig(map, rss_full2D, rss_real2D, rss_est2D, figName, dir)
+    % 初始化设置
     [buildX, buildY] = itc(map.build, map.Nx);
-    
-    % Set color parameters
     n = 512;
     h = linspace(0.7, 0, n)';
     s = linspace(0.8, 1, n)';
@@ -158,18 +170,22 @@ function plotRSSfig(map, omega_est, rss_full2D, rss_real2D, rss_est2D, ...
     barMin = -75;
     barMax = 10;
     
-    % Prepare figure and settings
-    fig = figure('Visible', 'off', 'Position', [250, 100, 1200, 700]); % Suppress display
+    % 创建主图窗
+    fig = figure('Visible', 'off', 'Position', [250, 100, 1200, 700]);
+
+    % 检查文件是否存在
+    findFig = [
+        exist(fullfile(dir, figName{1}), 'file'), 
+        exist(fullfile(dir, figName{2}), 'file'),
+        exist(fullfile(dir, figName{3}), 'file')
+    ];
+    
+    % 遍历三个子图
     titles = {'Ground Truth', 'RSS real', 'RSS est'};
     data = {rss_full2D, rss_real2D, rss_est2D};
-    xlabels = {
-        sprintf('Y axis\n\n%s', method), 
-        sprintf('Y axis\n\nSelect Rate = %.0f%%\n\nSample Rate = %.2f', map.select_rate*100, sample_rate), 
-        sprintf('Y axis\n\nMSE = %.4f dB\n\nRMSE = %.4f dB', mse, rmse)
-    };
     
-    % Generate and save each subplot separately
     for k = 1:3
+        % 创建子图并绘制数据
         ax = subplot(1,3,k);
         imagesc(data{k});
         set(ax, 'YDir','normal');
@@ -177,32 +193,58 @@ function plotRSSfig(map, omega_est, rss_full2D, rss_real2D, rss_est2D, ...
         axis equal tight;
         hold(ax, 'on');
         colormap(ax, cmap);
-        set(ax, 'CLim', [barMin barMax]);
-        colorbar;
-        ylabel(colorbar, 'dBm');
+        set(ax, 'CLim', [barMin barMax]); % 统一颜色范围
+        
+        % 添加Colorbar并获取句柄
+        cb = colorbar(ax, 'Location', 'eastoutside'); % 强制右侧显示
+        ylabel(cb, 'dBm');
         title(titles{k});
-        xlabel(xlabels{k}, 'Interpreter', 'none');
         ylabel('X axis');
         
-        % Add markers
+        % 计算散点尺寸
         dpi = get(0, 'ScreenPixelsPerInch');
-        pos = ax.Position;
-        cellW = pos(3) / map.Nx;
-        cellH = pos(4) / map.Ny;
-        markerPix = min(cellW, cellH);
-        markerPt = markerPix * 72 / dpi;
-        markerSize = markerPt^2 + 30;
+        figPos = get(gcf, 'Position');
+        axPos = ax.Position;
+        axWidthInches = figPos(3) * axPos(3) / dpi;
+        axHeightInches = figPos(4) * axPos(4) / dpi;
+        cellWidthInches = axWidthInches / map.Nx;
+        cellHeightInches = axHeightInches / map.Ny;
+        markerDiameterInches = max(cellWidthInches, cellHeightInches);
+        markerAreaPointsSquared = (markerDiameterInches * 72)^2 * 0.98;
         
-        scatter(ax, buildY, buildX, markerSize, 's', ...
-               'MarkerFaceColor','k', 'MarkerEdgeColor','none');
+        % 绘制散点
+        scatter(ax, buildY, buildX, markerAreaPointsSquared, 's', ...
+                'MarkerFaceColor', 'k', 'MarkerEdgeColor', 'none');
         
-        % Save individual subplot
+        % 同步Colorbar与图像高度
+        axPos = ax.Position; % 获取坐标轴位置
+        cb.Position([2, 4]) = [axPos(2), axPos(4)]; 
+        
+        % 复制坐标轴和Colorbar
         tmpFig = figure('Visible', 'off');
-        copyobj(ax, tmpFig);
-        set(gca, 'Position', [0.1 0.1 0.8 0.8]); 
-        saveas(tmpFig, fullfile(dir_out, sprintf('%s-%d.png', expName, k)));
+        new_handles = copyobj([ax, cb], tmpFig); % 向量形式复制关联对象
+        new_ax = new_handles(1);
+        new_cb = new_handles(2);
+        
+        % 3.7 在临时图窗中重调位置
+        set(new_ax, 'Position', [0.1 0.1 0.7 0.8]);
+        % 保持Colorbar与图像等高
+        new_axPos = new_ax.Position;
+        set(new_cb, 'Position', [new_axPos(1)+new_axPos(3)+0.03, new_axPos(2), 0.03, new_axPos(4)]); 
+
+        switch k
+            case 1
+                if ~findFig(1)
+                    saveas(tmpFig, fullfile(dir, figName{1})); 
+                end
+            case 2
+                if ~findFig(2)
+                    saveas(tmpFig, fullfile(dir, figName{2})); 
+                end
+            case 3
+                saveas(tmpFig, fullfile(dir_out, figName{3})); 
+        end
         close(tmpFig);
     end
-    
-    close(fig); % Close main figure without saving
+    close(fig);
 end

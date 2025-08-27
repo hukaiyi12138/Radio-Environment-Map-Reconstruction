@@ -1,123 +1,106 @@
-function [X_hat_sparse] = halrtc(X_in)
-    %—— 把任何稀疏输入都转成密集 ——%
-    if issparse(X_in)
-        data = full(X_in);
-    else
-        data = X_in;
-    end
+function [X_out] = halrtc(X_in, mask)
+    %—— 稀疏输入处理 ——%
+    data = full(X_in);
+    fprintf("rank = %d\n", rank(data)); % input rank
 
-    %—— 参数 ——%
-    alpha1 = 1/3; alpha2 = 1/3; alpha3 = 1/3;
-    rho     = 1e-2;
-    MaxIter = 100;
+    %—— 二维矩阵处理 ——%
+    [I, J] = size(data);
+    data = reshape(data, [I, J, 1]); 
     
-    %—— 初始化 ——%
-%     [I,J,K] = size(data);
-    d = ndims(data);
-    if d == 2
-        [I,J] = size(data);
-        K = 1;
-        data = reshape(data, [I, J, 1]);
-    elseif d == 3
-        [I,J,K] = size(data);
-    else
-        error('halrtc: only supports 2D or 3D input');
-    end
-    
-    allZeroCols = all(data==0, 1);
-    maskUnobs = (data==0) & ~allZeroCols;
-    S = ones(size(data));
-    S(maskUnobs) = 0;
+    %—— 掩码生成 ——%
+    valid_mask = (data ~= 0);  % 找到不需要插值的位置
+    valid_mask(mask) = 1; % 找到特定的不需要插值的位置
 
-    obs     = data;
-%     S       = round(rand(I,J,K) + 0.3);
-    X       = S .* obs;
-    
+    S = double(valid_mask);  
+    X = S .* data;    
+
+    %—— 参数设置 ——%
+    alpha = [1/2, 1/2];
+    rho = 1e-2;
+    MaxIter = 3000;
+    tol = 1e-6;
+
+    %—— 预分配内存 ——%
     X_hat = X;
-
-    Y1 = zeros(I,J,K);  Y2 = Y1;  Y3 = Y1;
+    Y_cell = {zeros(I,J), zeros(I,J)};
     convergence = zeros(MaxIter,1);
-    
-    %—— 迭代 ——%
+
+    %—— 核心迭代 ——%
+    % 在迭代前添加低秩增强项
+    reg = 1e-5 * eye(size(X_hat(:,:,1)));  % 正则化矩阵
     tic;
-    fprintf("HaLRTC interpolating ...\n");
+    fprintf("HaLRTC running...\n");
     for it = 1:MaxIter
-        % fprintf("HaLRTC iter = %d\n", it);
-        B1 = t_refold( SVT( t_unfold(X_hat,1) + t_unfold(Y1,1)/rho, alpha1/rho ), 1, I,J,K );
-        B2 = t_refold( SVT( t_unfold(X_hat,2) + t_unfold(Y2,2)/rho, alpha2/rho ), 2, I,J,K );
-        B3 = t_refold( SVT( t_unfold(X_hat,3) + t_unfold(Y3,3)/rho, alpha3/rho ), 3, I,J,K );
-        
-        avgB = (B1+B2+B3 - (Y1+Y2+Y3)/rho) / 3;
-        X_hat = (1-S).*avgB + S.*X;
+        fprintf("Iter = %d\n", it);
+        B_cell = cell(1,2); 
 
-        Y1 = Y1 - rho*(B1 - X_hat);
-        Y2 = Y2 - rho*(B2 - X_hat);
-        Y3 = Y3 - rho*(B3 - X_hat);
-        
-        convergence(it) = sum( X_hat(maskUnobs).^2 );
-    end
-    
-    %—— 输出：如果是 3D，就做 cell array；否则直接 sparse 矩阵 ——%
-    if K > 1
-        X_hat_sparse = cell(1,K);
-        for k = 1:K
-            X_hat_sparse{k} = sparse( X_hat(:,:,k) );
+        % 并行处理行/列方向
+        parfor idx = 1:2  
+            X_unfold = data_unfold(X_hat, idx);
+            Y_unfold = Y_cell{idx};
+            M = gpuArray(X_unfold + Y_unfold/rho);
+            B_cell{idx} = data_refold(SVT(M, alpha(idx)/rho), idx, I, J);
         end
-    else
-        X_hat_sparse = sparse( X_hat(:,:,1) );
-    end
-    
-    % 计算 RMSE 和 MRE
-    err = obs(maskUnobs) - X_hat(maskUnobs);
-    RMSE = sqrt(mean(err.^2));
-    MRE  = sum(abs(err)) / sum(X_hat(maskUnobs));
-    
-    fprintf('HaLRTC finished\n');
-    fprintf("HaLRTC duration: %.4f sec/%d iters\n", toc, it);
-    fprintf('RMSE = %.4f  (veh/15min)\n', RMSE);
-    fprintf('MRE  = %.4f\n', MRE);
 
+        % 合并结果
+        avgB = (B_cell{1} + B_cell{2} - (Y_cell{1}+Y_cell{2})/rho) / 2 + reg;
+        X_hat = avgB; 
+        X_hat(valid_mask) = X(valid_mask);
+
+        % 更新乘子
+        Y_cell{1} = Y_cell{1} - rho*(B_cell{1} - X_hat);
+        Y_cell{2} = Y_cell{2} - rho*(B_cell{2} - X_hat);
+
+        % 更新rho与tol
+        if it > 20 && mod(it,10)==0
+            rho = rho * 0.935;  % 逐步衰减rho，避免梯度爆炸
+            % tol = max(tol*1.01, 1e-5);
+        end
+
+        % 收敛检测
+        convergence(it) = norm(X_hat(:) - avgB(:));
+        if it > 10 && abs(convergence(it)-convergence(it-1)) < tol
+            break; 
+        end
+    end
+
+    %—— 稀疏输出 ——%
+    X_out = sparse(X_hat(:,:,1));
+    fprintf('HaLRTC completed in %.2f sec (%d iters)\n', toc, it);
 end
 
-%%——— 函数：张量展开 ———%%
-function mat = t_unfold(tensor, mode)
-    [I, J, K] = size(tensor);
+%%—— 展开函数 ——%
+function mat = data_unfold(tensor, mode)
+    [I, J, ~] = size(tensor);
     switch mode
-        case 1
-            % 沿 mode-1：得到 I × (J*K)
-            mat = reshape(permute(tensor, [2 3 1]), J, K*I).';
-        case 2
-            % 沿 mode-2：得到 J × (I*K)
-            mat = reshape(permute(tensor, [1 3 2]), I, K*J).';
-        case 3
-            % 沿 mode-3：得到 K × (I*J)
-            mat = reshape(permute(tensor, [1 2 3]), I, J*K).';
+        case 1  % 行方向展开：I x J 矩阵
+            mat = tensor(:,:,1);
+        case 2  % 列方向展开：J x I 矩阵（转置）
+            mat = tensor(:,:,1)';
         otherwise
-            error('t_unfold: mode must be 1,2,3');
+            error('仅支持 mode=1 或 2');
     end
 end
 
-%%——— 函数：张量折叠 ———%%
-function tensor = t_refold(mat, mode, I, J, K)
+%%—— 折叠函数 ——%
+function tensor = data_refold(mat, mode, I, J)
     switch mode
-        case 1
-            tmp = reshape(mat.', [J, K, I]);
-            tensor = permute(tmp, [3 1 2]);
-        case 2
-            tmp = reshape(mat.', [I, K, J]);
-            tensor = permute(tmp, [1 3 2]);
-        case 3
-            tmp = reshape(mat.', [I, J, K]);
-            tensor = tmp;
+        case 1  % 行方向还原
+            tensor = reshape(mat, [I, J, 1]);
+        case 2  % 列方向还原（需转置回原始方向）
+            tensor = reshape(mat', [I, J, 1]);
         otherwise
-            error('t_refold: mode must be 1,2,3');
+            error('仅支持 mode=1 或 2');
     end
 end
 
-%%——— 函数：奇异值阈值化 SVT ———%%
+%%—— 奇异值阈值函数——%
 function Xd = SVT(X, tau)
-    [U, S, V] = svd(X, 'econ');
-    S_threshold = max(diag(S) - tau, 0);
-    Xd = U * diag(S_threshold) * V';
+    X_gpu = gpuArray(X);
+    [U, S, V] = svd(X_gpu, 'econ');
+    s = diag(S);
+    s(s < 1e-10) = 1e-10;  % 防止奇异值归零
+    thr = max(s - tau, 0);
+    Xd_gpu = U * diag(thr) * V';
+    Xd = gather(Xd_gpu);
 end
-

@@ -21,7 +21,14 @@ function [phi, phi_rt, phi0, p] = generate_phi(method, map)
             [phi] = phi_idw(phi_rt, map, p);
 
         case "halrtc"
-            [phi] = halrtc(phi_rt);
+            % For every single tx gain
+            phi = sparse(map.size, map.size);
+            col = map.selectedTxPos(:);
+            for i = 1:numel(col)
+                mat = reshape(phi_rt(:, col(i)), map.Nx, []);
+                [mat2] = halrtc(mat, map.build);
+                phi(:, col(i)) = mat2(:);
+            end
 
         case "kriging"
             [phi] = phi_idw(phi_rt, map);
@@ -40,5 +47,5 @@ function [phi_rt, phi0] = generate_phirt(map)
     phi0(:, map.selectedTxPos) = map.phi(:, map.selectedTxPos);
 
     phi_rt = phi0;
-    phi_rt(map.interPos, :) = 0;
+    phi_rt(map.interPos, :) = 0; % unselected position
 end

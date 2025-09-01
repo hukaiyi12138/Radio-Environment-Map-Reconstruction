@@ -8,7 +8,7 @@ sample_rate     = 0.15          ; % (sa) 0.01 ~ 0.15 / 0.05, 0.10, 0.15
 select_rate     = 0.5           ; % (se) Select partial Rx
 method_phi      = "idw"         ; % {idw, halrtc, kriging}
 method_psi      = "random"      ; % {random, mmi}
-method_recov    = "omp"         ; % {omp, sbl, csbl, msbl, cmsbl}
+method_recov    = "cmsbl"         ; % {omp, sbl, csbl, msbl, cmsbl}
 sigma2          = 0.05          ; % Noise power: σ^2
 
 % Output directory
@@ -115,16 +115,21 @@ rss_real2D = reshape(rss_real_dbm, map.Nx, map.Ny);
 rss_est2D = reshape(rss_est_dbm, map.Nx, map.Ny);
 
 %% Evaluation
-mse = 10 * log10(norm(omega_real - omega_est) / norm(omega_real));
+valid.mask = isfinite(rss_est_dbm) & isfinite(rss_full_dbm); % ignore Inf value
+valid.num = numel(valid.mask);
 
-% rmse = norm(rss_est_dbm(valid_mask) - rss_full_dbm(valid_mask)) / sqrt(map.size);
-valid_mask = isfinite(rss_est_dbm) & isfinite(rss_full_dbm);
-rmse = norm(rss_est_dbm(valid_mask) - rss_full_dbm(valid_mask)) / sqrt(numel(valid_mask));
-clear("valid_mask");
+% MSE - sparse signal recovery
+mse = 10 * log10(norm(omega_real - omega_est) / norm(omega_real));
+% RMSE - RSS recovery
+rmse = norm(rss_est_dbm(valid.mask) - rss_full_dbm(valid.mask)) / sqrt(valid.num);
+% MAE - dictionary
+mae = norm(rss_est_dbm(valid.mask) - rss_full_dbm(valid.mask), 1) / valid.num;
 
 fprintf('\n---- Evaluation: %s ----\n', exp);
 fprintf('MSE = %.4f dB\n', mse);
 fprintf('RMSE = %.4f dB\n', rmse);
+fprintf('MAE = %.4f dB\n', mae);
+clear("valid");
 
 %% Plot and save figure
 figName = {
@@ -226,7 +231,7 @@ function plotRSSfig(map, rss_full2D, rss_real2D, rss_est2D, figName, dir)
         new_ax = new_handles(1);
         new_cb = new_handles(2);
         
-        % 3.7 在临时图窗中重调位置
+        % 在临时图窗中重调位置
         set(new_ax, 'Position', [0.1 0.1 0.7 0.8]);
         % 保持Colorbar与图像等高
         new_axPos = new_ax.Position;
@@ -242,7 +247,7 @@ function plotRSSfig(map, rss_full2D, rss_real2D, rss_est2D, figName, dir)
                     saveas(tmpFig, fullfile(dir, figName{2})); 
                 end
             case 3
-                saveas(tmpFig, fullfile(dir_out, figName{3})); 
+                saveas(tmpFig, fullfile(dir, figName{3})); 
         end
         close(tmpFig);
     end

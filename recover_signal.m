@@ -19,7 +19,7 @@ function [omega_est, others] = recover_signal(method, y, Phi, sigma2, sparsity)
 
         case "csbl"
             % CSBL & Truncation
-            [omega_est_sbl, ~] = csbl(y, Phi, iter_sbl, sigma2);
+            [omega_est_sbl, ~] = sbl(y, Phi, iter_sbl, sigma2, 'true');
             omega_est_trun = truncate(omega_est_sbl); % Truncation
             omega_est = omega_est_trun; % Result
 
@@ -32,7 +32,7 @@ function [omega_est, others] = recover_signal(method, y, Phi, sigma2, sparsity)
 
         case "cmsbl"
             % CSBL & Truncation & MMD
-            [omega_est_sbl, ~] = csbl(y, Phi, iter_sbl, sigma2);
+            [omega_est_sbl, ~] = sbl(y, Phi, iter_sbl, sigma2, 'true');
             omega_est_trun = truncate(omega_est_sbl); % Truncation
             omega_est_mmd = mmd_cluster(omega_est_trun, sparsity); % MMD method
             omega_est = omega_est_mmd; % Result
@@ -40,7 +40,7 @@ function [omega_est, others] = recover_signal(method, y, Phi, sigma2, sparsity)
         otherwise
             error('Unsupported method in recover signal: %s', method);
     end
-    fprintf("Elapse time: %.2fsec", toc);
+    fprintf("Elapse time: %.2fsec\n", toc);
 
     % Trans to sparse matrix
     omega_est = sparse(omega_est);

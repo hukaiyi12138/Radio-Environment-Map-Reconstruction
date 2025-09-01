@@ -1,106 +1,109 @@
 function [X_out] = halrtc(X_in, mask)
-    %—— 稀疏输入处理 ——%
-    data = full(X_in);
-    fprintf("rank = %d\n", rank(data)); % input rank
-
-    %—— 二维矩阵处理 ——%
+    % ===== 输入与观测集合 =====
+    data = double(full(X_in));
     [I, J] = size(data);
-    data = reshape(data, [I, J, 1]); 
-    
-    %—— 掩码生成 ——%
-    valid_mask = (data ~= 0);  % 找到不需要插值的位置
-    valid_mask(mask) = 1; % 找到特定的不需要插值的位置
+    Omega = (data ~= 0);                 
+    Omega(mask) = 1;                     % 线性索引或同形状 logical 都可
 
-    S = double(valid_mask);  
-    X = S .* data;    
+    % ====== 归一化：按“观测量级”缩放到 O(1) ======
+    X_hat = zeros(I,J); 
+    if any(Omega(:))
+        scale = max(abs(data(Omega)));
+    else
+        scale = max(abs(data(:)));
+    end
+    data_s = data / scale;               % 归一化后的观测数据
+    X_hat(Omega) = data_s(Omega);        % 初值满足约束（用归一化值）
 
-    %—— 参数设置 ——%
-    alpha = [1/2, 1/2];
-    rho = 1e-2;
-    MaxIter = 3000;
-    tol = 1e-6;
+    % ===== 参数 =====
+    alpha = [0.5, 0.5];
+    rho   = 1e-2;                        
+    MaxIter = 1000;
+    tol = 1e-5;
 
-    %—— 预分配内存 ——%
-    X_hat = X;
-    Y_cell = {zeros(I,J), zeros(I,J)};
-    convergence = zeros(MaxIter,1);
+    % ===== 对偶变量：与“展开后的形状”一致 =====
+    Y1 = zeros(I, J);                     % mode-1：I x J
+    Y2 = zeros(J, I);                     % mode-2：J x I
 
-    %—— 核心迭代 ——%
-    % 在迭代前添加低秩增强项
-    reg = 1e-5 * eye(size(X_hat(:,:,1)));  % 正则化矩阵
-    tic;
+    % ===== 迭代 =====
     fprintf("HaLRTC running...\n");
+    t0 = tic;
+    M1_prev = zeros(I,J); M2_prev = zeros(J,I);
+
     for it = 1:MaxIter
-        fprintf("Iter = %d\n", it);
-        B_cell = cell(1,2); 
+        % --- 展开（在归一化尺度上）---
+        X1 = data_unfold_2d(X_hat, 1);    % I x J
+        X2 = data_unfold_2d(X_hat, 2);    % J x I
 
-        % 并行处理行/列方向
-        parfor idx = 1:2  
-            X_unfold = data_unfold(X_hat, idx);
-            Y_unfold = Y_cell{idx};
-            M = gpuArray(X_unfold + Y_unfold/rho);
-            B_cell{idx} = data_refold(SVT(M, alpha(idx)/rho), idx, I, J);
+        % --- M 步（每个模做 SVT，阈值 = alpha_i / rho）---
+        M1 = SVT_cpu(X1 + Y1/rho, alpha(1)/rho);
+        M2 = SVT_cpu(X2 + Y2/rho, alpha(2)/rho);
+
+        % --- X 步（合并 + 投影到观测约束）---
+        X_bar = ( ...
+            data_refold_2d(M1 - Y1/rho, 1, I, J) + ...
+            data_refold_2d(M2 - Y2/rho, 2, I, J) ) / 2;
+
+        X_hat = X_bar;
+        X_hat(Omega) = data_s(Omega);     % 硬投影
+        X_hat(~Omega) = min(max(X_hat(~Omega), 0), 1);
+
+        % --- 对偶更新：在与展开一致的空间里 ---
+        X1_new = data_unfold_2d(X_hat, 1);        % I x J
+        X2_new = data_unfold_2d(X_hat, 2);        % J x I
+        Y1 = Y1 + rho * (X1_new - M1);
+        Y2 = Y2 + rho * (X2_new - M2);
+
+        % --- 收敛判据（原始/对偶残差）---
+        r1 = norm(X1_new - M1, 'fro'); 
+        r2 = norm(X2_new - M2, 'fro');
+        r  = sqrt(r1^2 + r2^2);                   % primal residual
+
+        s1 = rho * norm(M1 - M1_prev, 'fro');
+        s2 = rho * norm(M2 - M2_prev, 'fro');
+        s  = sqrt(s1^2 + s2^2);                   % dual residual
+
+        M1_prev = M1; M2_prev = M2;
+
+        if r < tol && s < tol
+            fprintf('Converged at iter %d | r=%.3e, s=%.3e\n', it, r, s);
+            break;
         end
-
-        % 合并结果
-        avgB = (B_cell{1} + B_cell{2} - (Y_cell{1}+Y_cell{2})/rho) / 2 + reg;
-        X_hat = avgB; 
-        X_hat(valid_mask) = X(valid_mask);
-
-        % 更新乘子
-        Y_cell{1} = Y_cell{1} - rho*(B_cell{1} - X_hat);
-        Y_cell{2} = Y_cell{2} - rho*(B_cell{2} - X_hat);
-
-        % 更新rho与tol
-        if it > 20 && mod(it,10)==0
-            rho = rho * 0.935;  % 逐步衰减rho，避免梯度爆炸
-            % tol = max(tol*1.01, 1e-5);
-        end
-
-        % 收敛检测
-        convergence(it) = norm(X_hat(:) - avgB(:));
-        if it > 10 && abs(convergence(it)-convergence(it-1)) < tol
-            break; 
+        if mod(it,50)==0
+            fprintf('iter %d | r=%.3e, s=%.3e\n', it, r, s);
         end
     end
 
-    %—— 稀疏输出 ——%
-    X_out = sparse(X_hat(:,:,1));
-    fprintf('HaLRTC completed in %.2f sec (%d iters)\n', toc, it);
+    % ===== 反缩放输出 =====
+    X_out = sparse(X_hat * scale);
+    fprintf('HaLRTC completed in %.2fs (%d iters)\n', toc(t0), it);
 end
 
-%%—— 展开函数 ——%
-function mat = data_unfold(tensor, mode)
-    [I, J, ~] = size(tensor);
+% ===== 仅矩阵情形下的 unfold/refold =====
+function mat = data_unfold_2d(X, mode)
     switch mode
-        case 1  % 行方向展开：I x J 矩阵
-            mat = tensor(:,:,1);
-        case 2  % 列方向展开：J x I 矩阵（转置）
-            mat = tensor(:,:,1)';
-        otherwise
-            error('仅支持 mode=1 或 2');
+        case 1, mat = X;      
+        case 2, mat = X.';    
+        otherwise, error('mode must be 1 or 2');
     end
 end
 
-%%—— 折叠函数 ——%
-function tensor = data_refold(mat, mode, I, J)
+function X = data_refold_2d(mat, mode, I, J)
     switch mode
-        case 1  % 行方向还原
-            tensor = reshape(mat, [I, J, 1]);
-        case 2  % 列方向还原（需转置回原始方向）
-            tensor = reshape(mat', [I, J, 1]);
-        otherwise
-            error('仅支持 mode=1 或 2');
+        case 1, X = reshape(mat, [I, J]);
+        case 2, X = reshape(mat.', [I, J]);
+        otherwise, error('mode must be 1 or 2');
     end
 end
 
-%%—— 奇异值阈值函数——%
-function Xd = SVT(X, tau)
-    X_gpu = gpuArray(X);
-    [U, S, V] = svd(X_gpu, 'econ');
+% ===== 稳定的 CPU 版 SVT =====
+function Xd = SVT_cpu(X, tau)
+    [U,S,V] = svd(X, 'econ');
     s = diag(S);
-    s(s < 1e-10) = 1e-10;  % 防止奇异值归零
-    thr = max(s - tau, 0);
-    Xd_gpu = U * diag(thr) * V';
-    Xd = gather(Xd_gpu);
+    s = max(s - tau, 0);
+    if isempty(s)
+        Xd = zeros(size(X));
+    else
+        Xd = U * diag(s) * V';
+    end
 end

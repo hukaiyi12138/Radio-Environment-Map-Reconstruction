@@ -1,5 +1,5 @@
 %% Choose method to generate sparse dictionary
-function [phi, phi_rt, phi0, p] = generate_phi(method, map)
+function [phi, phi_rt, phi0] = generate_phi(method, map)
     fprintf('\n---- Generating φ ----\n');
 
     % Generate phi_rt
@@ -7,17 +7,18 @@ function [phi, phi_rt, phi0, p] = generate_phi(method, map)
 
     switch(method)
         case "idw"
-            % Choose the best param p
-            switch(map.name)
-                case "tinymap"
-                    p = 12;
-                case "largemap"
-                    p = 11;
-                case "hugemap"
-                    p = 10;
-                otherwise
-                    p = 3;
-            end
+            % % Choose the best param p
+            % switch(map.name)
+            %     case "tinymap"
+            %         p = 12;
+            %     case "largemap"
+            %         p = 11;
+            %     case "hugemap"
+            %         p = 10;
+            %     otherwise
+            %         p = 2;
+            % end
+            p = 2;
             [phi] = phi_idw(phi_rt, map, p);
 
         case "halrtc"
@@ -31,11 +32,13 @@ function [phi, phi_rt, phi0, p] = generate_phi(method, map)
             end
 
         case "kriging"
-            [phi] = phi_idw(phi_rt, map);
+            [phi] = kriging(phi_rt, map);
 
         otherwise
             error('Unsupported method in generating φ: %s', method);
     end
+
+    phi = sparse(phi);
 
 end
 

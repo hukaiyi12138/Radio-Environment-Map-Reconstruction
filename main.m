@@ -6,19 +6,25 @@ mapname         = "tinymap"    ; % {tinymap, largemap, hugemap}
 K               = 4             ; % {4, 8, 12, 16}
 sample_rate     = 0.15          ; % (sa) 0.01 ~ 0.15 / 0.05, 0.10, 0.15
 select_rate     = 0.5           ; % (se) Select partial Rx
-method_phi      = "idw"         ; % {idw, halrtc, kriging}
-method_psi      = "random"      ; % {random, mmi}
-method_recov    = "cmsbl"         ; % {omp, sbl, csbl, msbl, cmsbl}
 sigma2          = 0.05          ; % Noise power: σ^2
+method_phi      = "kriging"         ; % {idw, halrtc, kriging}
+method_psi      = "random"      ; % {random, mmi}
+method_recov    = "omp"         ; % {omp, sbl, csbl, msbl, cmsbl}
+figPlot         = true          ; % plot figures or not
 
 % Output directory
 if ~exist("result", "dir")
     mkdir("result");
 end
 
-dir = sprintf("result/%s", mapname);
+dir = sprintf("result/%s", mapname); % map path
 if ~exist(dir,"dir")
     mkdir(dir);
+end
+
+dir_fig = fullfile(dir, "figures"); % figures path
+if ~exist(dir_fig, "dir")
+    mkdir(dir_fig); 
 end
 
 % Code start
@@ -29,7 +35,7 @@ fprintf('Map: %s\n', mapname);
 fprintf('Method: %s\n', method);
 
 % Create output directory
-dir_out = sprintf("%s/%s", dir, exp);
+dir_out = sprintf("%s/%s", dir, exp); % exp path
 if ~exist(dir_out,"dir")
     mkdir(dir_out);
 end
@@ -97,60 +103,93 @@ end
 % Transmit process
 omega_real = map.omega_real;
 Phi = psi * phi; % Sensing matrix
-y = Phi * omega_real; % Observation vector
+y = Phi * omega_real + sigma2; % Observation vector
 
 %% Recover signal
-[omega_est] = recover_signal(method_recov, y, Phi, sigma2, K);
+result_name = sprintf('%s/%s.mat', dir_out, exp);
+if ~exist(result_name, 'file')
+    [omega_est] = recover_signal(method_recov, y, Phi, sigma2, K);
 
-rss_full_vec = phi0 * map.omega_real;
-rss_real_vec = phi_rt * map.omega_real;
-rss_est_vec = phi * omega_est;
-
-rss_full_dbm = ln_to_db(rss_full_vec);
-rss_real_dbm = ln_to_db(rss_real_vec);
-rss_est_dbm = ln_to_db(rss_est_vec);
-
-rss_full2D = reshape(rss_full_dbm, map.Nx, map.Ny);
-rss_real2D = reshape(rss_real_dbm, map.Nx, map.Ny);
-rss_est2D = reshape(rss_est_dbm, map.Nx, map.Ny);
+    rss_full_vec = phi0 * map.omega_real;
+    rss_real_vec = phi_rt * map.omega_real;
+    rss_est_vec = phi * omega_est;
+    
+    rss_full_dbm = ln_to_db(rss_full_vec);
+    rss_real_dbm = ln_to_db(rss_real_vec);
+    rss_est_dbm = ln_to_db(rss_est_vec);
+    
+    rss_full2D = reshape(rss_full_dbm, map.Nx, map.Ny);
+    rss_real2D = reshape(rss_real_dbm, map.Nx, map.Ny);
+    rss_est2D = reshape(rss_est_dbm, map.Nx, map.Ny);
+else
+    fprintf("Read exp file: %s\n", result_name);
+    load(result_name);
+end
 
 %% Evaluation
-valid.mask = isfinite(rss_est_dbm) & isfinite(rss_full_dbm); % ignore Inf value
-valid.num = numel(valid.mask);
+if ~exist(result_name, 'file')
+    valid.mask = isfinite(rss_est_dbm) & isfinite(rss_full_dbm); % ignore Inf value
+    valid.num = numel(valid.mask);
+    
+    % MSE - sparse signal recovery
+    mse = 10 * log10(norm(omega_real - omega_est) / norm(omega_real));
+    % RMSE - RSS recovery
+    rmse = norm(rss_est_dbm(valid.mask) - rss_full_dbm(valid.mask)) / sqrt(valid.num);
+    % MAE - dictionary
+    mae = norm(rss_est_dbm(valid.mask) - rss_full_dbm(valid.mask), 1) / valid.num;
 
-% MSE - sparse signal recovery
-mse = 10 * log10(norm(omega_real - omega_est) / norm(omega_real));
-% RMSE - RSS recovery
-rmse = norm(rss_est_dbm(valid.mask) - rss_full_dbm(valid.mask)) / sqrt(valid.num);
-% MAE - dictionary
-mae = norm(rss_est_dbm(valid.mask) - rss_full_dbm(valid.mask), 1) / valid.num;
+    clear("valid");
+end
 
 fprintf('\n---- Evaluation: %s ----\n', exp);
 fprintf('MSE = %.4f dB\n', mse);
 fprintf('RMSE = %.4f dB\n', rmse);
 fprintf('MAE = %.4f dB\n', mae);
-clear("valid");
 
 %% Plot and save figure
+% Plot figures
 figName = {
-    sprintf('%s-Ground_Truth.png', map.name), 
-    sprintf('%s_K=%d_se=%.2f.png', map.name, K, select_rate), 
+    sprintf('%s-Ground_Truth.png', map.name), ...
+    sprintf('%s_K=%d_se=%.2f.png', map.name, K, select_rate), ...
     sprintf('%s.png', exp)
 };
-plotRSSfig(map, rss_full2D, rss_real2D, rss_est2D, figName, dir);
-clear("figName");
+
+% draw figs
+if figPlot
+    plotRSSfig(map, method, rss_full2D, rss_real2D, rss_est2D, figName, dir_fig);
+end
 
 % Save result
-result_name = sprintf('%s/%s.mat', dir_out, exp);
-save(result_name);
+if ~exist(result_name, 'file')
+    save(result_name);
+
+    % data repository
+    params = struct( ...
+        'map',              mapname, ...
+        'exper',            string(exp), ...
+        'method',           string(method), ...
+        'method_phi',       method_phi, ...
+        'method_psi',       method_psi, ...
+        'method_recovery',  method_recov, ...
+        'sparsity',         K, ...
+        'sample_rate',      sample_rate, ...
+        'select_rate',      select_rate, ...
+        'noise_power',      sigma2 ...
+    );
+
+    metrics = struct('MSE', mse, 'RMSE', rmse, 'MAE', mae);
+
+    logfile = fullfile(dir, 'ExperLog.csv');
+    log_experiment(logfile, params, metrics);
+end
 
 fprintf('\n---- Code finished ----\n');
 
 %% Additional function
 % Convert dB to linear
-function ln = db_to_ln(db)
-    ln = 10.^(db./10);
-end
+% function ln = db_to_ln(db)
+%     ln = 10.^(db./10);
+% end
 
 % Convert linear to dB
 function db = ln_to_db(ln)
@@ -164,92 +203,151 @@ function [x, y] = itc(idx, Nx)
 end
 
 % Plot and save RSS figure
-function plotRSSfig(map, rss_full2D, rss_real2D, rss_est2D, figName, dir)
-    % 初始化设置
+function plotRSSfig(map, method, rss_full2D, rss_real2D, rss_est2D, figName, dir)
     [buildX, buildY] = itc(map.build, map.Nx);
+
+    % 颜色和范围
     n = 512;
-    h = linspace(0.7, 0, n)';
-    s = linspace(0.8, 1, n)';
-    v = linspace(0.9, 1, n)';
-    cmap = hsv2rgb([h, s, v]);
-    barMin = -75;
-    barMax = 10;
-    
-    % 创建主图窗
-    fig = figure('Visible', 'off', 'Position', [250, 100, 1200, 700]);
+    cmap = hsv2rgb([linspace(0.7,0,n)', linspace(0.8,1,n)', linspace(0.9,1,n)']);
+    barMin = -75; barMax = 10;
 
-    % 检查文件是否存在
-    findFig = [
-        exist(fullfile(dir, figName{1}), 'file'), 
-        exist(fullfile(dir, figName{2}), 'file'),
-        exist(fullfile(dir, figName{3}), 'file')
-    ];
-    
-    % 遍历三个子图
-    titles = {'Ground Truth', 'RSS real', 'RSS est'};
-    data = {rss_full2D, rss_real2D, rss_est2D};
-    
+    % 跳过：三张都存在就不画
+    paths = cellfun(@(f) fullfile(dir, f), figName, 'UniformOutput', false);
+    if all(cellfun(@isfile, paths)), return; end
+
+    fig = figure('Visible','off','Position', [250,100,2000,1000],'Color','w');
+    titles = {'Ground Truth', 'Sparse Sampling', sprintf('%s', method)};
+    data   = {rss_full2D, rss_real2D, rss_est2D};
+
     for k = 1:3
-        % 创建子图并绘制数据
-        ax = subplot(1,3,k);
-        imagesc(data{k});
-        set(ax, 'YDir','normal');
-        axis([1 map.Nx 1 map.Ny]);
-        axis equal tight;
-        hold(ax, 'on');
-        colormap(ax, cmap);
-        set(ax, 'CLim', [barMin barMax]); % 统一颜色范围
-        
-        % 添加Colorbar并获取句柄
-        cb = colorbar(ax, 'Location', 'eastoutside'); % 强制右侧显示
-        ylabel(cb, 'dBm');
-        title(titles{k});
-        ylabel('X axis');
-        
-        % 计算散点尺寸
-        dpi = get(0, 'ScreenPixelsPerInch');
-        figPos = get(gcf, 'Position');
-        axPos = ax.Position;
-        axWidthInches = figPos(3) * axPos(3) / dpi;
-        axHeightInches = figPos(4) * axPos(4) / dpi;
-        cellWidthInches = axWidthInches / map.Nx;
-        cellHeightInches = axHeightInches / map.Ny;
-        markerDiameterInches = max(cellWidthInches, cellHeightInches);
-        markerAreaPointsSquared = (markerDiameterInches * 72)^2 * 0.98;
-        
-        % 绘制散点
-        scatter(ax, buildY, buildX, markerAreaPointsSquared, 's', ...
-                'MarkerFaceColor', 'k', 'MarkerEdgeColor', 'none');
-        
-        % 同步Colorbar与图像高度
-        axPos = ax.Position; % 获取坐标轴位置
-        cb.Position([2, 4]) = [axPos(2), axPos(4)]; 
-        
-        % 复制坐标轴和Colorbar
-        tmpFig = figure('Visible', 'off');
-        new_handles = copyobj([ax, cb], tmpFig); % 向量形式复制关联对象
-        new_ax = new_handles(1);
-        new_cb = new_handles(2);
-        
-        % 在临时图窗中重调位置
-        set(new_ax, 'Position', [0.1 0.1 0.7 0.8]);
-        % 保持Colorbar与图像等高
-        new_axPos = new_ax.Position;
-        set(new_cb, 'Position', [new_axPos(1)+new_axPos(3)+0.03, new_axPos(2), 0.03, new_axPos(4)]); 
+        D = data{k};
+        D(isinf(D) & D < 0) = NaN;
 
-        switch k
-            case 1
-                if ~findFig(1)
-                    saveas(tmpFig, fullfile(dir, figName{1})); 
-                end
-            case 2
-                if ~findFig(2)
-                    saveas(tmpFig, fullfile(dir, figName{2})); 
-                end
-            case 3
-                saveas(tmpFig, fullfile(dir, figName{3})); 
+        ax = subplot(1,3,k);
+        set(ax,'Color','w');
+        imagesc(ax, D, 'AlphaData', ~isnan(D));
+        set(ax,'YDir','normal'); axis([1 map.Nx 1 map.Ny]); axis equal tight;
+        colormap(ax, cmap); set(ax,'CLim',[barMin barMax]);
+
+        cb = colorbar(ax,'Location','eastoutside'); ylabel(cb,'dBm');
+        title(titles{k}, 'Interpreter','none');
+        xlabel('Y axis'); ylabel('X axis');
+
+        % 快速建筑覆盖
+        overlay_buildings(ax, map, buildX, buildY);
+
+        % 导出该子图
+        out_path = fullfile(dir, figName{k});
+        need_save = (k < 3 && ~isfile(out_path)) || k == 3;
+        if need_save
+            exportgraphics(ax, out_path, 'Resolution', 180);
         end
-        close(tmpFig);
     end
     close(fig);
+end
+
+% Plot building positions
+function overlay_buildings(ax, map, buildX, buildY)
+    B = false(map.Nx, map.Ny);
+    B(sub2ind([map.Nx, map.Ny], buildX, buildY)) = true;
+    C = zeros(map.Nx, map.Ny, 3);  % 黑色
+    hold(ax,'on');
+    hi = image(ax, C);
+    set(hi, 'AlphaData', B);
+    uistack(hi,'top');
+end
+
+% Save exper data
+function log_experiment(logfile, params, metrics)
+    % % 拼一行
+    % row = struct();
+    % row.timestamp = string(datetime('now','TimeZone','local','Format','yyyy-MM-dd HH:mm:ss'));
+    % 参数
+    pf = fieldnames(params);
+    for i = 1:numel(pf); row.(pf{i}) = params.(pf{i}); end
+    % 指标
+    mf = fieldnames(metrics);
+    for i = 1:numel(mf); row.(mf{i}) = metrics.(mf{i}); end
+
+    Trow = struct2table(row); % 标准化为 table
+
+    if isfile(logfile)
+        Texist = readtable(logfile);
+
+        % 类型/列名对齐（以新行 Trow 为模板）
+        Texist = harmonize_types_and_vars(Texist, Trow);
+        Trow   = harmonize_types_and_vars(Trow, Texist); % 双向一次，确保顺序一致
+
+        % 以 exp 为主键 upsert（没有 exp 列则纯追加）
+        if ismember('exp', Texist.Properties.VariableNames)
+            exp_exist = string(Texist.exp);
+            exp_new   = string(Trow.exp);
+            idx = strcmp(exp_exist, exp_new);
+        else
+            idx = false(height(Texist),1);
+        end
+
+        if any(idx)
+            Texist(idx, :) = Trow(:, Texist.Properties.VariableNames);
+        else
+            Texist = [Texist; Trow(:, Texist.Properties.VariableNames)];
+        end
+
+        writetable(Texist, logfile);
+    else
+        % 首次写入
+        writetable(Trow, logfile);
+    end
+end
+
+function T = harmonize_types_and_vars(T, Tref)
+    % 确保 T 至少拥有 Tref 的所有列，且类型与 Tref 对齐（double 或 string）
+    refVars = Tref.Properties.VariableNames;
+
+    % 先补列
+    for k = 1:numel(refVars)
+        vn = refVars{k};
+        if ~ismember(vn, T.Properties.VariableNames)
+            % 依据 Tref 的类型选择默认值
+            cls = class(Tref.(vn));
+            if ismember(cls, {'double','single'})
+                T.(vn) = nan(height(T),1);
+            elseif ismember(cls, {'string','char','cell'})
+                T.(vn) = strings(height(T),1);
+            else
+                % 其他类型一律当字符串存
+                T.(vn) = strings(height(T),1);
+            end
+        end
+    end
+
+    % 再做类型对齐
+    for k = 1:numel(refVars)
+        vn  = refVars{k};
+        cls_ref = class(Tref.(vn));
+        cls_cur = class(T.(vn));
+        if ~strcmp(cls_ref, cls_cur)
+            try
+                if ismember(cls_ref, {'double','single'})
+                    % 目标是数值
+                    if iscell(T.(vn)); T.(vn) = string(T.(vn)); end
+                    if isstring(T.(vn)) || ischar(T.(vn))
+                        T.(vn) = double(str2double(string(T.(vn))));
+                    elseif islogical(T.(vn))
+                        T.(vn) = double(T.(vn));
+                    else
+                        T.(vn) = double(T.(vn));
+                    end
+                else
+                    T.(vn) = string(T.(vn));
+                end
+            catch
+                % 若转换失败，回退为字符串
+                T.(vn) = string(T.(vn));
+            end
+        end
+    end
+
+    % 变量顺序按参考表
+    T = T(:, refVars);
 end

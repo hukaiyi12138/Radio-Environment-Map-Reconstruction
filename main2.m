@@ -1,15 +1,15 @@
 %% main2
 clear; close all; clc;
 
-mapname         = "tinymap";
+mapname         = "hugemap";
 Ks              = [4, 8, 12, 16];
 sample_rates    = linspace(0.01, 0.15, 15);
 select_rates    = linspace(0.1, 0.5, 5);
-sigma2s         = [0.05, 0.1];
+sigma2s         = [0.01, 0.05, 0.1];
 method_phis     = ["idw", "halrtc", "kriging"];
 method_psis     = ["random", "mmi"];
 method_recovs   = ["omp", "sbl", "csbl", "msbl", "cmsbl"];
-plotFig         = false;
+target          = false;
 
 % Output directory
 if ~exist("result", "dir")
@@ -36,8 +36,8 @@ for K = Ks
                     for psi = method_psis
                         for recov = method_recovs
                             try
-                                plotFig = setPlotFig(K, sa, se, s2, phi, psi, recov);
-                                runExpers(mapname, K, sa, se, s2, phi, psi, recov, plotFig);
+                                target = setPlotFig(K, sa, se, s2, phi, psi, recov);
+                                runExpers(dir, dir_fig, mapname, K, sa, se, s2, phi, psi, recov, target);
                             catch ME
                                 warning('Skip combo due to error: K=%d, sa=%.2f, se=%.2f, sigma2=%.3f, phi=%s, psi=%s, recov=%s\n%s', ...
                                     K, sa, se, s2, phi, psi, recov, getReport(ME,'basic','hyperlinks','off'));
@@ -54,11 +54,18 @@ fprintf('==== Grid finished ====\n');
 
 %% Additional function
 % Run single exper
-function runExpers(mapname, K, sample_rate, select_rate, sigma2, method_phi, method_psi, method_recov, plotFig)
+function runExpers(dir, dir_fig, mapname, K, sample_rate, select_rate, sigma2, method_phi, method_psi, method_recov, target)
     if nargin < 8
-        plotFig = false;
+        target = false;
     end
+    
+    t0 = tic;
 
+    % Output directory
+    if ~exist("result", "dir")
+        mkdir("result");
+    end
+    
     % Code start
     fprintf('---- Code started ----\n');
     method = sprintf('%s_%s_%s', method_phi, method_psi, method_recov); % entire method name
@@ -66,18 +73,12 @@ function runExpers(mapname, K, sample_rate, select_rate, sigma2, method_phi, met
     fprintf('Map: %s\n', mapname);
     fprintf('Method: %s\n', method);
     
-    % Create output directory
-    dir_out = sprintf("%s/%s", dir, exp); % exp path
-    if ~exist(dir_out,"dir")
-        mkdir(dir_out);
-    end
-    
     % Load map file
     file_map = sprintf('%s/%s.mat', dir, mapname);
     if ~exist(file_map, "file")
         fprintf("Generating map: %s\n", mapname);
         map = generate_map2D(mapname);
-        save(file_map, 'map'); 
+        %save(file_map, 'map'); 
     else
         fprintf("Read map file: %s\n", file_map);
         load(file_map);
@@ -102,7 +103,7 @@ function runExpers(mapname, K, sample_rate, select_rate, sigma2, method_phi, met
         map.selectedTxPos = [map.Tx(1:K).pos];
         map.omega_real = sparse(map.selectedTxPos, 1, [map.Tx(1:K).Pt_mW], map.size, 1);
     
-        save(file_map_se, 'map');
+        %save(file_map_se, 'map');
     else
         fprintf("Read map file: %s\n", file_map_se);
         load(file_map_se);
@@ -114,19 +115,21 @@ function runExpers(mapname, K, sample_rate, select_rate, sigma2, method_phi, met
     if ~exist(file_phi, "file")
         fprintf("Generating φ by %s\n", method_phi);
         [phi, phi_rt, phi0] = generate_phi(method_phi, map);
-        save(file_phi,'method_phi', 'phi', 'phi_rt', 'phi0');
+        %save(file_phi,'method_phi', 'phi', 'phi_rt', 'phi0');
     else 
         fprintf("Read φ file: %s\n", file_phi);
         load(file_phi);
     end
     
     %% Generate measurement matrix
-    file_psi = sprintf('%s/%s_psi_%s_K=%d_sa=%.2f_se=%.2f.mat', dir_out, ...
-        mapname, method_psi, K, sample_rate, select_rate);
-    if ~exist(file_psi, "file")
+    file_psi = sprintf('%s/%s_psi_%s_%s_K=%d_sa=%.2f_se=%.2f.mat', dir, ...
+        mapname, method_psi, method_phi, K, sample_rate, select_rate);
+    if ~exist(file_psi, "file") 
         fprintf("Generating φ by %s\n", method_psi);
         [psi] = generate_psi(method_psi, map, sample_rate, phi);
-        save(file_psi,'method_psi', 'psi');
+        if method_psi == "mmi"
+            save(file_psi,'method_psi', 'psi');
+        end
     else 
         fprintf("Read ψ file: %s\n", file_psi);
         load(file_psi);
@@ -135,10 +138,11 @@ function runExpers(mapname, K, sample_rate, select_rate, sigma2, method_phi, met
     % Transmit process
     omega_real = map.omega_real;
     Phi = psi * phi; % Sensing matrix
-    y = Phi * omega_real + sigma2; % Observation vector
+    noise = sqrt(sigma2) * randn(size(Phi, 1), 1); % Gaussian noise
+    y = Phi * omega_real + noise; % Observation vector
     
     %% Recover signal
-    result_name = sprintf('%s/%s.mat', dir_out, exp);
+    result_name = sprintf('%s/%s.mat', dir, exp);
     if ~exist(result_name, 'file')
         [omega_est] = recover_signal(method_recov, y, Phi, sigma2, K);
     
@@ -157,6 +161,8 @@ function runExpers(mapname, K, sample_rate, select_rate, sigma2, method_phi, met
         fprintf("Read exp file: %s\n", result_name);
         load(result_name);
     end
+
+    time = toc(t0);
     
     %% Evaluation
     if ~exist(result_name, 'file')
@@ -177,7 +183,7 @@ function runExpers(mapname, K, sample_rate, select_rate, sigma2, method_phi, met
     fprintf('MSE = %.4f dB\n', mse);
     fprintf('RMSE = %.4f dB\n', rmse);
     fprintf('MAE = %.4f dB\n', mae);
-
+    
     %% Plot and save figure
     % Plot figures
     figName = {
@@ -185,42 +191,38 @@ function runExpers(mapname, K, sample_rate, select_rate, sigma2, method_phi, met
         sprintf('%s_K=%d_se=%.2f.png', map.name, K, select_rate), ...
         sprintf('%s.png', exp)
     };
-    
-    % draw figs
-    if plotFig
+  
+    % Data repository
+    params = struct( ...
+        'map',              mapname, ...
+        'exper',            string(exp), ...
+        'method',           string(method), ...
+        'method_phi',       method_phi, ...
+        'method_psi',       method_psi, ...
+        'method_recovery',  method_recov, ...
+        'sparsity',         K, ...
+        'sample_rate',      sample_rate, ...
+        'select_rate',      select_rate, ...
+        'noise_power',      sigma2, ...
+        'elapse_time',      time ...
+    );
+
+    metrics = struct('MSE', mse, 'RMSE', rmse, 'MAE', mae);
+    logfile = fullfile(dir, 'ExperLog.csv');
+    log_experiment(logfile, params, metrics);
+
+    % Draw figs & Save result
+    if target
         plotRSSfig(map, method, rss_full2D, rss_real2D, rss_est2D, figName, dir_fig);
+        %save(result_name);
     end
-    
-    % Save result
-    if ~exist(result_name, 'file')
-        save(result_name);
-    
-        % data repository
-        params = struct( ...
-            'map',              mapname, ...
-            'exper',            string(exp), ...
-            'method_phi',       method_phi, ...
-            'method_psi',       method_psi, ...
-            'method_recovery',  method_recov, ...
-            'sparsity',         K, ...
-            'sample_rate',      sample_rate, ...
-            'select_rate',      select_rate, ...
-            'noise_power',      sigma2, ...
-            'method',           string(method) ...
-        );
-    
-        metrics = struct('MSE', mse, 'RMSE', rmse, 'MAE', mae);
-    
-        logfile = fullfile(dir, 'ExperLog.csv');
-        log_experiment(logfile, params, metrics);
-    end
-    
+
     fprintf('\n---- Code finished ----\n');
 end
 
 % Set plotFig - plot only in particular condition
 function plotFig = setPlotFig(K, sa, se, si, phi, psi, recov)
-    plotFig = K == 4 && sa == 0.15 && se == 0.5 && si == 0.05;
+    plotFig = K == 4 && (sa == 0.01 || sa == 0.15) && se == 0.5 && si == 0.05;
 end
 
 % Convert dB to linear

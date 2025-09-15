@@ -7,17 +7,6 @@ function [phi, phi_rt, phi0] = generate_phi(method, map)
 
     switch(method)
         case "idw"
-            % % Choose the best param p
-            % switch(map.name)
-            %     case "tinymap"
-            %         p = 12;
-            %     case "largemap"
-            %         p = 11;
-            %     case "hugemap"
-            %         p = 10;
-            %     otherwise
-            %         p = 2;
-            % end
             p = 2;
             [phi] = phi_idw(phi_rt, map, p);
 

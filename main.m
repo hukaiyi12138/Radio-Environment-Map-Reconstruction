@@ -2,12 +2,12 @@
 clear; close all; clc;
 
 %% Set params
-mapname         = "tinymap"    ; % {tinymap, largemap, hugemap}
+mapname         = "tinymap"    ; % {tinymap, largemap, hugemap, bupt}
 K               = 4             ; % {4, 8, 12, 16}
 sample_rate     = 0.15          ; % (sa) 0.01 ~ 0.15 / 0.05, 0.10, 0.15
 select_rate     = 0.5           ; % (se) Select partial Rx
 sigma2          = 0.05          ; % Noise power: σ^2
-method_phi      = "kriging"         ; % {idw, halrtc, kriging}
+method_phi      = "idw"         ; % {idw, halrtc, kriging}
 method_psi      = "random"      ; % {random, mmi}
 method_recov    = "omp"         ; % {omp, sbl, csbl, msbl, cmsbl}
 figPlot         = true          ; % plot figures or not
@@ -33,12 +33,6 @@ method = sprintf('%s_%s_%s', method_phi, method_psi, method_recov); % entire met
 exp = sprintf('%s_%s_K=%d_sa=%.2f_se=%.2f_si=%.2f', mapname, method, K, sample_rate, select_rate, sigma2);
 fprintf('Map: %s\n', mapname);
 fprintf('Method: %s\n', method);
-
-% Create output directory
-dir_out = sprintf("%s/%s", dir, exp); % exp path
-if ~exist(dir_out,"dir")
-    mkdir(dir_out);
-end
 
 % Load map file
 file_map = sprintf('%s/%s.mat', dir, mapname);
@@ -89,12 +83,14 @@ else
 end
 
 %% Generate measurement matrix
-file_psi = sprintf('%s/%s_psi_%s_K=%d_sa=%.2f_se=%.2f.mat', dir_out, ...
-    mapname, method_psi, K, sample_rate, select_rate);
-if ~exist(file_psi, "file")
+file_psi = sprintf('%s/%s_psi_%s_%s_K=%d_sa=%.2f_se=%.2f.mat', dir, ...
+        mapname, method_psi, method_phi, K, sample_rate, select_rate);
+if ~exist(file_psi, "file") 
     fprintf("Generating φ by %s\n", method_psi);
     [psi] = generate_psi(method_psi, map, sample_rate, phi);
-    save(file_psi,'method_psi', 'psi');
+    if method_psi == "mmi"
+        save(file_psi,'method_psi', 'psi');
+    end
 else 
     fprintf("Read ψ file: %s\n", file_psi);
     load(file_psi);
@@ -103,10 +99,11 @@ end
 % Transmit process
 omega_real = map.omega_real;
 Phi = psi * phi; % Sensing matrix
-y = Phi * omega_real + sigma2; % Observation vector
+noise = sqrt(sigma2) * randn(size(Phi, 1), 1); % Gaussian noise
+y = Phi * omega_real + noise; % Observation vector
 
 %% Recover signal
-result_name = sprintf('%s/%s.mat', dir_out, exp);
+result_name = sprintf('%s/%s.mat', dir, exp);
 if ~exist(result_name, 'file')
     [omega_est] = recover_signal(method_recov, y, Phi, sigma2, K);
 
